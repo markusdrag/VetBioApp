@@ -1,0 +1,42 @@
+# Real or potentially sensitive data
+*.xlsx
+*.xls
+*.xlsm
+*.csv
+*.tsv
+*.rds
+*.RDS
+*.RData
+*.rda
+*.sav
+*.sas7bdat
+
+# Shinylive needs this package index. It is not study data.
+!shinylive/webr/packages/metadata.rds
+
+# Generated statistical output
+*.zip
+*.docx
+*.pdf
+analysis_outputs_*
+plot_cart_*
+filtered_data_*
+reproducible_analysis_*
+
+# R local state
+.Rhistory
+.RData
+.Rproj.user/
+renv/library/
+renv/staging/
+
+# macOS and editor files
+.DS_Store
+._*
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.temp
+*~

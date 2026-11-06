@@ -1,6 +1,6 @@
 # Veterinary Biostatistics App
 
-Exploratory biostatistics for veterinary studies, written by Markus Hodal Drag. Version 3.4.29 runs in the browser with Shinylive. The example workbook is synthetic. A file you choose is read in the browser and is not sent to a server.
+Exploratory biostatistics for veterinary studies. All kind of cool analyses you would want to do with your precious experimental data.
 
 ## No warranty
 

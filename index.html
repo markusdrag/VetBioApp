@@ -4,6 +4,113 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Veterinary Biostatistics App</title>
+    <style>
+      #vetbio-boot {
+        position: fixed;
+        inset: 0;
+        z-index: 100000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #F3F7F4;
+        color: #1C2822;
+        font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+        transition: opacity 0.3s ease;
+      }
+      #vetbio-boot .panel { width: min(34rem, calc(100% - 2rem)); }
+      #vetbio-boot h1 { margin: 0 0 0.4rem; font-size: 1.35rem; color: #1B4332; }
+      #vetbio-boot p { margin: 0.35rem 0; line-height: 1.4; }
+      #vetbio-boot .status { font-weight: 650; }
+      #vetbio-boot .bar {
+        height: 0.7rem;
+        margin: 0.8rem 0 0.35rem;
+        background: #D8E6DE;
+        border-radius: 999px;
+        overflow: hidden;
+      }
+      #vetbio-boot .bar > span {
+        display: block;
+        height: 100%;
+        width: 0;
+        background: #1B4332;
+        transition: width 0.25s ease;
+      }
+      #vetbio-boot .quiet { color: #3D4F46; font-size: 0.92rem; }
+    </style>
+    <div id="vetbio-boot" role="status" aria-live="polite">
+      <div class="panel">
+        <h1>Veterinary Biostatistics App</h1>
+        <p class="status" id="vetbio-status">Preparing the download…</p>
+        <div class="bar"><span id="vetbio-bar"></span></div>
+        <p class="quiet" id="vetbio-detail">0 MB received</p>
+        <p class="quiet">The first visit downloads R and the statistics packages, about 110 MB. Later visits reuse what this browser has already saved.</p>
+        <p class="quiet" id="vetbio-time"></p>
+      </div>
+    </div>
+    <script>
+      (function () {
+        var files = new Map();
+        var started = Date.now();
+        var estimate = 113 * 1024 * 1024;
+        var status = document.getElementById("vetbio-status");
+        var detail = document.getElementById("vetbio-detail");
+        var bar = document.getElementById("vetbio-bar");
+        var time = document.getElementById("vetbio-time");
+        function mb(bytes) { return (bytes / 1048576).toFixed(bytes > 10485760 ? 0 : 1); }
+        function render() {
+          var loaded = 0;
+          var packages = 0;
+          var active = "";
+          files.forEach(function (file) {
+            loaded += file.loaded || 0;
+            if (file.url.indexOf("/packages/") !== -1 && file.done) packages += 1;
+            if (!file.done) active = file.label;
+          });
+          var pct = Math.max(2, Math.min(96, Math.round(loaded / estimate * 100)));
+          if (!active && loaded > 8 * 1048576) {
+            status.textContent = "Starting the app. This step can take another minute.";
+            pct = Math.max(pct, 96);
+          } else if (active) {
+            status.textContent = active;
+          }
+          bar.style.width = pct + "%";
+          detail.textContent = mb(loaded) + " MB received" + (packages ? " · " + packages + " packages finished" : "");
+        }
+        function hideBoot() {
+          var boot = document.getElementById("vetbio-boot");
+          if (!boot || boot.dataset.gone) return;
+          boot.dataset.gone = "1";
+          bar.style.width = "100%";
+          status.textContent = "Opening the app…";
+          boot.style.opacity = "0";
+          setTimeout(function () { boot.remove(); }, 320);
+        }
+        function appIsUp() {
+          var frame = document.querySelector("#root iframe");
+          if (!frame) return false;
+          try {
+            var doc = frame.contentDocument;
+            return !!(doc && doc.querySelector(".navbar, .bslib-sidebar-layout, .shiny-bound-input"));
+          } catch (error) {
+            return false;
+          }
+        }
+        if (navigator.serviceWorker) {
+          navigator.serviceWorker.addEventListener("message", function (event) {
+            var msg = event.data;
+            if (!msg || msg.type !== "vetbio-progress") return;
+            files.set(msg.url, msg);
+            render();
+          });
+        }
+        setInterval(function () {
+          var seconds = Math.round((Date.now() - started) / 1000);
+          var minutes = Math.floor(seconds / 60);
+          time.textContent = minutes ? "Elapsed " + minutes + " min " + (seconds % 60) + " s" : "Elapsed " + seconds + " s";
+          if (appIsUp()) hideBoot();
+        }, 500);
+      })();
+    </script>
     <script
       src="./shinylive/load-shinylive-sw.js"
       type="module"

@@ -1838,7 +1838,68 @@ function asgiToRes(res, body) {
 // src/shinylive-sw.ts
 var useCaching = false;
 var cacheName = "::shinyliveServiceworker";
-var version = "v10";
+var version = "v11";
+var vetbioLastNotice = {};
+function vetbioLabel(url) {
+  const path = url.pathname;
+  if (path.endsWith("/R.wasm")) return "Downloading R";
+  if (path.indexOf("library.data") !== -1) return "Downloading the R library";
+  if (path.indexOf("/vfs/") !== -1) return "Downloading R files";
+  const parts = path.split("/");
+  const pkgAt = parts.indexOf("packages");
+  if (pkgAt !== -1 && parts[pkgAt + 1]) return "Downloading " + parts[pkgAt + 1];
+  return "Downloading " + (parts[parts.length - 1] || "a file");
+}
+function vetbioNotify(payload) {
+  const key = payload.url;
+  const now = Date.now();
+  if (!payload.done && vetbioLastNotice[key] && now - vetbioLastNotice[key] < 250) return;
+  vetbioLastNotice[key] = now;
+  self.clients.matchAll({ includeUncontrolled: true, type: "window" }).then((clients) => {
+    for (const client of clients) client.postMessage(payload);
+  });
+}
+async function vetbioTrackedFetch(request) {
+  const response = await fetch(request);
+  const url = new URL(request.url);
+  const label = vetbioLabel(url);
+  const total = Number(response.headers.get("content-length") || 0);
+  const coi = url.searchParams.get("coi") === "1" || (request.referrer || "").indexOf("coi=1") !== -1;
+  if (!response.body) {
+    vetbioNotify({ type: "vetbio-progress", url: request.url, label, loaded: total, total, done: true });
+    return response;
+  }
+  const reader = response.body.getReader();
+  let loaded = 0;
+  const stream = new ReadableStream({
+    async pull(controller) {
+      try {
+        const chunk = await reader.read();
+        if (chunk.done) {
+          vetbioNotify({ type: "vetbio-progress", url: request.url, label, loaded, total: total || loaded, done: true });
+          controller.close();
+          return;
+        }
+        loaded += chunk.value.byteLength;
+        vetbioNotify({ type: "vetbio-progress", url: request.url, label, loaded, total, done: false });
+        controller.enqueue(chunk.value);
+      } catch (error) {
+        controller.error(error);
+      }
+    }
+  });
+  const headers = new Headers(response.headers);
+  if (coi) {
+    headers.set("Cross-Origin-Embedder-Policy", "require-corp");
+    headers.set("Cross-Origin-Resource-Policy", "cross-origin");
+    headers.set("Cross-Origin-Opener-Policy", "same-origin");
+  }
+  return new Response(stream, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
+}
 function addCoiHeaders(resp) {
   const headers = new Headers(resp.headers);
   headers.set("Cross-Origin-Embedder-Policy", "require-corp");
@@ -1939,6 +2000,10 @@ self.addEventListener("fetch", function(event) {
         }
       })()
     );
+    return;
+  }
+  if (request.method === "GET" && url.pathname.indexOf("/shinylive/webr/") !== -1) {
+    event.respondWith(vetbioTrackedFetch(request));
     return;
   }
   if (request.method !== "GET") {

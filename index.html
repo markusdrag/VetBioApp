@@ -99,6 +99,14 @@
           navigator.serviceWorker.addEventListener("message", function (event) {
             var msg = event.data;
             if (!msg || msg.type !== "vetbio-progress") return;
+            if (msg.cached) {
+              if (!files.size) {
+                status.textContent = "Opening the saved copy of R and the packages.";
+                detail.textContent = "Saved in this browser";
+                bar.style.width = "100%";
+              }
+              return;
+            }
             files.set(msg.url, msg);
             render();
           });

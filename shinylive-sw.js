@@ -1838,7 +1838,9 @@ function asgiToRes(res, body) {
 // src/shinylive-sw.ts
 var useCaching = false;
 var cacheName = "::shinyliveServiceworker";
-var version = "v11";
+// v12 stores R and the packages. app.json is loaded from the network on every visit.
+// Bump this when files under shinylive/webr change, so an old saved copy is deleted.
+var version = "v12";
 var vetbioLastNotice = {};
 function vetbioLabel(url) {
   const path = url.pathname;
@@ -1859,12 +1861,48 @@ function vetbioNotify(payload) {
     for (const client of clients) client.postMessage(payload);
   });
 }
-async function vetbioTrackedFetch(request) {
-  const response = await fetch(request);
+function vetbioCacheKey(request) {
   const url = new URL(request.url);
+  return new Request(url.origin + url.pathname, { method: "GET" });
+}
+function vetbioCoiRequested(request) {
+  const url = new URL(request.url);
+  return url.searchParams.get("coi") === "1" || (request.referrer || "").indexOf("coi=1") !== -1;
+}
+async function vetbioTrackedFetch(request, event) {
+  const url = new URL(request.url);
+  const cache = await caches.open(version + cacheName);
+  const cacheKey = vetbioCacheKey(request);
+  if (!request.headers.get("range")) {
+    const cached = await cache.match(cacheKey, { ignoreVary: true });
+    if (cached) {
+      vetbioNotify({
+        type: "vetbio-progress",
+        url: request.url,
+        label: "Opening saved files",
+        loaded: 0,
+        total: 0,
+        done: true,
+        cached: true
+      });
+      return vetbioCoiRequested(request) ? addCoiHeaders(cached) : cached;
+    }
+  }
+  const response = await fetch(request);
   const label = vetbioLabel(url);
   const total = Number(response.headers.get("content-length") || 0);
-  const coi = url.searchParams.get("coi") === "1" || (request.referrer || "").indexOf("coi=1") !== -1;
+  const coi = vetbioCoiRequested(request);
+  if (response.ok && response.status === 200 && response.body && !request.headers.get("range")) {
+    const copy = response.clone();
+    const storing = cache.put(cacheKey, copy).catch(function() {});
+    if (event) {
+      try {
+        event.waitUntil(storing);
+      } catch (error) {
+        storing.catch(function() {});
+      }
+    }
+  }
   if (!response.body) {
     vetbioNotify({ type: "vetbio-progress", url: request.url, label, loaded: total, total, done: true });
     return response;
@@ -2002,8 +2040,20 @@ self.addEventListener("fetch", function(event) {
     );
     return;
   }
+  if (request.method === "GET" && url.pathname.endsWith("/app.json")) {
+    event.respondWith((async () => {
+      const fresh = await fetch(new Request(request.url, {
+        method: "GET",
+        headers: request.headers,
+        credentials: request.credentials,
+        cache: "no-cache"
+      }));
+      return coiRequested ? addCoiHeaders(fresh) : fresh;
+    })());
+    return;
+  }
   if (request.method === "GET" && url.pathname.indexOf("/shinylive/webr/") !== -1) {
-    event.respondWith(vetbioTrackedFetch(request));
+    event.respondWith(vetbioTrackedFetch(request, event));
     return;
   }
   if (request.method !== "GET") {

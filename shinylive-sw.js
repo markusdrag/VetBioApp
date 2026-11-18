@@ -1838,106 +1838,7 @@ function asgiToRes(res, body) {
 // src/shinylive-sw.ts
 var useCaching = false;
 var cacheName = "::shinyliveServiceworker";
-// v12 stores R and the packages. app.json is loaded from the network on every visit.
-// Bump this when files under shinylive/webr change, so an old saved copy is deleted.
-var version = "v12";
-var vetbioLastNotice = {};
-function vetbioLabel(url) {
-  const path = url.pathname;
-  if (path.endsWith("/R.wasm")) return "Downloading R";
-  if (path.indexOf("library.data") !== -1) return "Downloading the R library";
-  if (path.indexOf("/vfs/") !== -1) return "Downloading R files";
-  const parts = path.split("/");
-  const pkgAt = parts.indexOf("packages");
-  if (pkgAt !== -1 && parts[pkgAt + 1]) return "Downloading " + parts[pkgAt + 1];
-  return "Downloading " + (parts[parts.length - 1] || "a file");
-}
-function vetbioNotify(payload) {
-  const key = payload.url;
-  const now = Date.now();
-  if (!payload.done && vetbioLastNotice[key] && now - vetbioLastNotice[key] < 250) return;
-  vetbioLastNotice[key] = now;
-  self.clients.matchAll({ includeUncontrolled: true, type: "window" }).then((clients) => {
-    for (const client of clients) client.postMessage(payload);
-  });
-}
-function vetbioCacheKey(request) {
-  const url = new URL(request.url);
-  return new Request(url.origin + url.pathname, { method: "GET" });
-}
-function vetbioCoiRequested(request) {
-  const url = new URL(request.url);
-  return url.searchParams.get("coi") === "1" || (request.referrer || "").indexOf("coi=1") !== -1;
-}
-async function vetbioTrackedFetch(request, event) {
-  const url = new URL(request.url);
-  const cache = await caches.open(version + cacheName);
-  const cacheKey = vetbioCacheKey(request);
-  if (!request.headers.get("range")) {
-    const cached = await cache.match(cacheKey, { ignoreVary: true });
-    if (cached) {
-      vetbioNotify({
-        type: "vetbio-progress",
-        url: request.url,
-        label: "Opening saved files",
-        loaded: 0,
-        total: 0,
-        done: true,
-        cached: true
-      });
-      return vetbioCoiRequested(request) ? addCoiHeaders(cached) : cached;
-    }
-  }
-  const response = await fetch(request);
-  const label = vetbioLabel(url);
-  const total = Number(response.headers.get("content-length") || 0);
-  const coi = vetbioCoiRequested(request);
-  if (response.ok && response.status === 200 && response.body && !request.headers.get("range")) {
-    const copy = response.clone();
-    const storing = cache.put(cacheKey, copy).catch(function() {});
-    if (event) {
-      try {
-        event.waitUntil(storing);
-      } catch (error) {
-        storing.catch(function() {});
-      }
-    }
-  }
-  if (!response.body) {
-    vetbioNotify({ type: "vetbio-progress", url: request.url, label, loaded: total, total, done: true });
-    return response;
-  }
-  const reader = response.body.getReader();
-  let loaded = 0;
-  const stream = new ReadableStream({
-    async pull(controller) {
-      try {
-        const chunk = await reader.read();
-        if (chunk.done) {
-          vetbioNotify({ type: "vetbio-progress", url: request.url, label, loaded, total: total || loaded, done: true });
-          controller.close();
-          return;
-        }
-        loaded += chunk.value.byteLength;
-        vetbioNotify({ type: "vetbio-progress", url: request.url, label, loaded, total, done: false });
-        controller.enqueue(chunk.value);
-      } catch (error) {
-        controller.error(error);
-      }
-    }
-  });
-  const headers = new Headers(response.headers);
-  if (coi) {
-    headers.set("Cross-Origin-Embedder-Policy", "require-corp");
-    headers.set("Cross-Origin-Resource-Policy", "cross-origin");
-    headers.set("Cross-Origin-Opener-Policy", "same-origin");
-  }
-  return new Response(stream, {
-    status: response.status,
-    statusText: response.statusText,
-    headers
-  });
-}
+var version = "v13";
 function addCoiHeaders(resp) {
   const headers = new Headers(resp.headers);
   headers.set("Cross-Origin-Embedder-Policy", "require-corp");
@@ -2038,22 +1939,6 @@ self.addEventListener("fetch", function(event) {
         }
       })()
     );
-    return;
-  }
-  if (request.method === "GET" && url.pathname.endsWith("/app.json")) {
-    event.respondWith((async () => {
-      const fresh = await fetch(new Request(request.url, {
-        method: "GET",
-        headers: request.headers,
-        credentials: request.credentials,
-        cache: "no-cache"
-      }));
-      return coiRequested ? addCoiHeaders(fresh) : fresh;
-    })());
-    return;
-  }
-  if (request.method === "GET" && url.pathname.indexOf("/shinylive/webr/") !== -1) {
-    event.respondWith(vetbioTrackedFetch(request, event));
     return;
   }
   if (request.method !== "GET") {
